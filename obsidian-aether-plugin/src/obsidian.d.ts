@@ -26,6 +26,7 @@ declare module 'obsidian' {
   }
 
   export interface Vault {
+    configDir: string;
     getMarkdownFiles(): TFile[];
     getAbstractFileByPath(path: string): TAbstractFile | null;
     read(file: TFile): Promise<string>;
@@ -170,4 +171,12 @@ declare module 'obsidian' {
 
   export function requestUrl(request: RequestUrlParam | string): Promise<RequestUrlResponse>;
   export function normalizePath(path: string): string;
+
+  export const Platform: {
+    isDesktop: boolean;
+    isMobile: boolean;
+    isWin: boolean;
+    isMacOS: boolean;
+    isLinux: boolean;
+  };
 }

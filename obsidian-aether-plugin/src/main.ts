@@ -23,12 +23,8 @@ import type {
 
 const INBOX_REL_PATH = 'Aether/Inbox.md';
 const APPROVED_MIRROR_REL_PATH = 'Aether/Compiled/Approved.md';
-const BUILTIN_IGNORED_DIRS = new Set(['.obsidian', '.git', '.trash', '.aether']);
-const BUILTIN_IGNORED_PREFIXES = [
-  'aether/inbox.md',
-  'aether/compiled',
-  '.obsidian/plugins/aether-memory/data.json',
-];
+const BUILTIN_IGNORED_DIRS = new Set(['.git', '.trash', '.aether']);
+const BUILTIN_IGNORED_PREFIXES = ['aether/inbox.md', 'aether/compiled'];
 const BUILTIN_IGNORED_EXTENSIONS = ['.canvas', '.excalidraw', '.excalidraw.md'];
 
 export interface StatusBarHandle {
@@ -44,6 +40,7 @@ export interface ObsidianCommandDescriptor {
 }
 
 export interface ObsidianHostAdapter {
+  readonly configDir?: string;
   addStatusBarItem(): StatusBarHandle;
   addCommand(cmd: ObsidianCommandDescriptor): void;
   notify(message: string): void;
@@ -141,12 +138,23 @@ function matchesIgnorePattern(rel: string, pattern: string): boolean {
 /**
  * Evaluates built-in Aether vault exclusions and optional `.aetherignore` patterns.
  */
-export function isIgnoredVaultPath(relPath: string, aetherignoreContent?: string): boolean {
+export function isIgnoredVaultPath(
+  relPath: string,
+  aetherignoreContent?: string,
+  configDir?: string,
+): boolean {
   const rel = normalizeVaultRelPath(relPath);
   if (rel.length === 0) {
     return true;
   }
   const lower = rel.toLowerCase();
+  const normConfigDir = configDir ? normalizeVaultRelPath(configDir).toLowerCase() : '';
+  if (
+    normConfigDir.length > 0 &&
+    (pathMatchesPrefix(lower, normConfigDir) || lower.split('/').includes(normConfigDir))
+  ) {
+    return true;
+  }
   if (BUILTIN_IGNORED_PREFIXES.some((prefix) => pathMatchesPrefix(lower, prefix))) {
     return true;
   }
@@ -156,7 +164,7 @@ export function isIgnoredVaultPath(relPath: string, aetherignoreContent?: string
   if (!lower.endsWith('.md')) {
     return true;
   }
-  if (lower.split('/').some((seg) => BUILTIN_IGNORED_DIRS.has(seg))) {
+  if (lower.split('/').some((seg) => BUILTIN_IGNORED_DIRS.has(seg) || seg.startsWith('.'))) {
     return true;
   }
   if (!aetherignoreContent) {
@@ -174,7 +182,7 @@ export function isIgnoredVaultPath(relPath: string, aetherignoreContent?: string
 
 export async function computeSha256Hex(content: string): Promise<string> {
   const bytes = new TextEncoder().encode(content);
-  const digest = await globalThis.crypto.subtle.digest('SHA-256', bytes);
+  const digest = await crypto.subtle.digest('SHA-256', bytes);
   return Array.from(new Uint8Array(digest), (b) => b.toString(16).padStart(2, '0')).join('');
 }
 
@@ -252,58 +260,39 @@ export function renderInboxPane(
   controller: InboxReviewController,
   onUpdated?: () => void,
 ): void {
-  const doc = container.ownerDocument;
-  const el = (tag: string, className?: string, text?: string): HTMLElement => {
-    const node = doc.createElement(tag);
-    if (className) {
-      node.className = className;
-    }
-    if (text !== undefined) {
-      node.textContent = text;
-    }
-    return node;
-  };
-
   container.replaceChildren();
-  const header = el('div', 'aether-inbox-header');
-  header.appendChild(el('h3', undefined, 'Aether inbox'));
+  const header = container.createEl('div', {cls: 'aether-inbox-header'});
+  header.createEl('h3', {text: 'Aether inbox'});
   if (controller.pending.length > 0) {
-    header.appendChild(el('span', 'aether-inbox-count', `${controller.pending.length} to review`));
+    header.createEl('span', {
+      cls: 'aether-inbox-count',
+      text: `${controller.pending.length} to review`,
+    });
   }
-  container.appendChild(header);
 
   if (controller.pending.length === 0) {
-    const empty = el('div', 'aether-inbox-empty');
-    empty.appendChild(el('p', 'aether-inbox-empty-title', 'Nothing to review.'));
-    empty.appendChild(
-      el(
-        'p',
-        undefined,
-        'When an AI agent proposes a memory through aether-mcp, it appears here. Nothing becomes memory until you approve it.',
-      ),
-    );
-    container.appendChild(empty);
+    const empty = container.createEl('div', {cls: 'aether-inbox-empty'});
+    empty.createEl('p', {cls: 'aether-inbox-empty-title', text: 'Nothing to review.'});
+    empty.createEl('p', {
+      text: 'When an AI agent proposes a memory through aether-mcp, it appears here. Nothing becomes memory until you approve it.',
+    });
     return;
   }
 
   for (const entry of controller.pending) {
-    const card = el('div', 'aether-inbox-card');
+    const card = container.createEl('div', {cls: 'aether-inbox-card'});
     card.setAttribute('data-candidate-id', entry.candidate_id);
-    card.appendChild(el('p', 'aether-inbox-fact', entry.proposed_fact));
-    card.appendChild(
-      el(
-        'div',
-        'aether-inbox-meta',
-        `Proposed by ${entry.proposed_by} on ${entry.proposed_date}. ${capitalize(entry.tier)} memory in scope ${entry.scope}.`,
-      ),
-    );
-    const error = el('div', 'aether-inbox-error');
+    card.createEl('p', {cls: 'aether-inbox-fact', text: entry.proposed_fact});
+    card.createEl('div', {
+      cls: 'aether-inbox-meta',
+      text: `Proposed by ${entry.proposed_by} on ${entry.proposed_date}. ${capitalize(entry.tier)} memory in scope ${entry.scope}.`,
+    });
+    const error = card.createEl('div', {cls: 'aether-inbox-error'});
     error.setAttribute('role', 'alert');
-    card.appendChild(error);
 
-    const actions = el('div', 'aether-inbox-actions');
-    const approveBtn = el('button', 'mod-cta', 'Approve') as HTMLButtonElement;
-    const rejectBtn = el('button', undefined, 'Reject') as HTMLButtonElement;
+    const actions = card.createEl('div', {cls: 'aether-inbox-actions'});
+    const approveBtn = actions.createEl('button', {cls: 'mod-cta', text: 'Approve'});
+    const rejectBtn = actions.createEl('button', {text: 'Reject'});
     const decide = async (decision: InboxDecision): Promise<void> => {
       approveBtn.disabled = true;
       rejectBtn.disabled = true;
@@ -326,10 +315,6 @@ export function renderInboxPane(
     };
     approveBtn.onclick = () => decide('approve');
     rejectBtn.onclick = () => decide('reject');
-    actions.appendChild(approveBtn);
-    actions.appendChild(rejectBtn);
-    card.appendChild(actions);
-    container.appendChild(card);
   }
 }
 
@@ -354,7 +339,7 @@ export class AetherCompanionPlugin {
   constructor(
     host: ObsidianHostAdapter,
     baseUrl = DEFAULT_CONTROL_PLANE_URL,
-    fetchOrOptions: FetchLike | AetherClientOptions = fetch,
+    fetchOrOptions: FetchLike | AetherClientOptions = {},
   ) {
     this.host = host;
     this.client = new AetherControlClient(baseUrl, fetchOrOptions);
@@ -372,7 +357,7 @@ export class AetherCompanionPlugin {
 
   reconfigure(
     baseUrl: string,
-    fetchOrOptions: FetchLike | AetherClientOptions = fetch,
+    fetchOrOptions: FetchLike | AetherClientOptions = {},
   ): void {
     this.client = new AetherControlClient(baseUrl, fetchOrOptions);
     this.defaultKvModel = resolveDefaultKvModel(fetchOrOptions);
@@ -516,7 +501,7 @@ export class AetherCompanionPlugin {
     }
 
     const aetherignore = (await this.host.readFile('.aetherignore')) ?? undefined;
-    if (isIgnoredVaultPath(relPath, aetherignore)) {
+    if (isIgnoredVaultPath(relPath, aetherignore, this.host.configDir)) {
       return null;
     }
 
@@ -531,7 +516,7 @@ export class AetherCompanionPlugin {
       await this.pushAndApplyMirrors({aetherignore: ''});
       return this.syncVaultWithAether();
     }
-    if (isManagedMirrorPath(relPath) || isIgnoredVaultPath(relPath)) {
+    if (isManagedMirrorPath(relPath) || isIgnoredVaultPath(relPath, undefined, this.host.configDir)) {
       return null;
     }
     return this.pushAndApplyMirrors({deleted_paths: [relPath]});
@@ -546,10 +531,10 @@ export class AetherCompanionPlugin {
     const notes: VaultNotePush[] = [];
     const privatePaths: string[] = [];
 
-    if (!isManagedMirrorPath(oldPath) && !isIgnoredVaultPath(oldPath, aetherignore)) {
+    if (!isManagedMirrorPath(oldPath) && !isIgnoredVaultPath(oldPath, aetherignore, this.host.configDir)) {
       deletedPaths.push(oldPath);
     }
-    if (!isManagedMirrorPath(newPath) && !isIgnoredVaultPath(newPath, aetherignore)) {
+    if (!isManagedMirrorPath(newPath) && !isIgnoredVaultPath(newPath, aetherignore, this.host.configDir)) {
       const newContent = await this.host.readFile?.(newPath);
       if (newContent !== null && newContent !== undefined) {
         if (isPrivateMarkdownNote(newContent)) {
@@ -601,7 +586,7 @@ export class AetherCompanionPlugin {
       if (
         relPath.toLowerCase() === pulled.inbox_path.toLowerCase() ||
         relPath.toLowerCase() === pulled.approved_mirror_path.toLowerCase() ||
-        isIgnoredVaultPath(relPath, aetherignore)
+        isIgnoredVaultPath(relPath, aetherignore, this.host.configDir)
       ) {
         continue;
       }

@@ -10,6 +10,18 @@ import type {VaultEvent} from './types.ts';
 
 export type RequestUrlLike = (request: RequestUrlParam) => Promise<RequestUrlResponse>;
 
+export interface TimerAdapter {
+  setTimeout(callback: () => void, ms: number): number;
+  clearTimeout(id: number): void;
+}
+
+const BROWSER_TIMERS: TimerAdapter = {
+  setTimeout: (callback, ms) => window.setTimeout(callback, ms),
+  clearTimeout: (id) => {
+    window.clearTimeout(id);
+  },
+};
+
 export interface ObsidianDesktopAdapterOptions {
   app: App;
   registerEvent: (ref: EventRef) => void;
@@ -20,11 +32,12 @@ export interface ObsidianDesktopAdapterOptions {
   debounceMs?: number;
   isLiveSyncEnabled?: () => boolean;
   onSyncError?: (error: unknown) => void;
+  timers?: TimerAdapter;
 }
 
 interface PendingUpsert {
   event: Extract<VaultEvent, {kind: 'create' | 'modify'}>;
-  timer: ReturnType<typeof setTimeout>;
+  timer: number;
   handler: (event: VaultEvent) => Promise<void>;
 }
 
@@ -125,10 +138,16 @@ export class PathDebouncer {
   private readonly pending = new Map<string, PendingUpsert>();
   private workChain: Promise<void> = Promise.resolve();
   private readonly onError?: (error: unknown) => void;
+  private readonly timers: TimerAdapter;
 
-  constructor(debounceMs = 1500, onError?: (error: unknown) => void) {
+  constructor(
+    debounceMs = 1500,
+    onError?: (error: unknown) => void,
+    timers: TimerAdapter = BROWSER_TIMERS,
+  ) {
     this.debounceMs = Math.max(0, debounceMs);
     this.onError = onError;
+    this.timers = timers;
   }
 
   setDebounceMs(ms: number): void {
@@ -140,9 +159,9 @@ export class PathDebouncer {
     handler: (event: VaultEvent) => Promise<void>,
   ): void {
     this.cancelPath(event.path);
-    const timer = setTimeout(() => {
+    const timer = this.timers.setTimeout(() => {
       this.pending.delete(event.path);
-      this.queueDispatch(event, handler);
+      void this.queueDispatch(event, handler);
     }, this.debounceMs);
     this.pending.set(event.path, {event, timer, handler});
   }
@@ -164,11 +183,11 @@ export class PathDebouncer {
     const entries = [...this.pending.values()];
     this.pending.clear();
     for (const entry of entries) {
-      clearTimeout(entry.timer);
+      this.timers.clearTimeout(entry.timer);
     }
     if (mode === 'flush') {
       for (const entry of entries) {
-        this.queueDispatch(entry.event, entry.handler);
+        void this.queueDispatch(entry.event, entry.handler);
       }
     }
     await this.workChain;
@@ -179,7 +198,7 @@ export class PathDebouncer {
     if (!existing) {
       return;
     }
-    clearTimeout(existing.timer);
+    this.timers.clearTimeout(existing.timer);
     this.pending.delete(path);
   }
 
@@ -222,7 +241,15 @@ export class ObsidianDesktopAdapter implements ObsidianHostAdapter {
     this.notifier = options.notify;
     this.inboxPaneOpener = options.openInboxPane;
     this.isLiveSyncEnabled = options.isLiveSyncEnabled ?? (() => true);
-    this.debouncer = new PathDebouncer(options.debounceMs ?? 1500, options.onSyncError);
+    this.debouncer = new PathDebouncer(
+      options.debounceMs ?? 1500,
+      options.onSyncError,
+      options.timers,
+    );
+  }
+
+  get configDir(): string {
+    return this.app.vault.configDir;
   }
 
   addStatusBarItem(): StatusBarHandle {
