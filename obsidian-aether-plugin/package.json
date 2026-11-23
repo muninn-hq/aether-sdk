@@ -1,6 +1,6 @@
 {
   "name": "muninn-aether-obsidian-plugin",
-  "version": "0.4.4",
+  "version": "0.4.5",
   "private": true,
   "type": "module",
   "scripts": {
@@ -13,7 +13,7 @@
   "devDependencies": {
     "@types/node": "^24.0.0",
     "esbuild": "^0.25.0",
-    "obsidian": "^1.5.0",
+    "obsidian": "^1.7.2",
     "typescript": "~6.0.2"
   }
 }

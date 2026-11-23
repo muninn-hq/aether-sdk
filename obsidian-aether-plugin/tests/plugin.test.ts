@@ -1149,7 +1149,7 @@ describe('Aether Obsidian Release Verification', () => {
   it('verifies tracked plugin files before build and full release directory when main.js is built', () => {
     const pluginRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
     const hasBundle = fs.existsSync(path.join(pluginRoot, 'main.js'));
-    const report = verifyReleaseDirectory(pluginRoot, {tag: '0.4.4'});
+    const report = verifyReleaseDirectory(pluginRoot, {tag: '0.4.5'});
 
     if (hasBundle) {
       assert.equal(report.ok, true, formatVerificationReport(report));
@@ -1200,8 +1200,8 @@ describe('community plugin manifest', () => {
     assert.ok(manifest.description.length <= 250, 'description must be at most 250 characters');
     assert.ok(manifest.description.endsWith('.'), 'description must end with a period');
     assert.match(manifest.description, /^Give your AI agents memory/);
-    // Obsidian prefixes every command with the manifest name, so keep it short; the description carries the search keywords.
-    assert.equal(manifest.name, 'AMC');
+    // Keep the manifest name concise and non-all-caps; the description carries additional search keywords.
+    assert.equal(manifest.name, 'Aether Memory');
     assert.match(manifest.description, /Aether|MCP|memory/i);
     assert.doesNotMatch(manifest.description, /obsidian/i);
   });
