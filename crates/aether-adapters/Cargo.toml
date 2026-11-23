@@ -37,7 +37,7 @@ uuid.workspace = true
 pgvector = { version = "0.4", features = ["sqlx"], optional = true }
 redis = { version = "0.27", features = ["tokio-comp", "connection-manager"], optional = true }
 reqwest = { version = "0.13", default-features = false, features = ["json", "rustls"], optional = true }
-rusqlite = { version = "0.41", features = ["bundled"], optional = true }
+rusqlite = { version = "0.43", features = ["bundled"], optional = true }
 sqlx = { version = "0.9", default-features = false, features = ["postgres", "runtime-tokio", "tls-rustls", "json", "uuid", "chrono"], optional = true }
 
 [dev-dependencies]
