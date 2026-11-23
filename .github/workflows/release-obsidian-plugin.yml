@@ -167,8 +167,8 @@ jobs:
             --exclude='node_modules' \
             --exclude='main.js' \
             --exclude='main.js.map' \
+            --exclude='/README.md' \
             --filter='protect /LICENSE' \
-            --filter='protect /README.md' \
             --filter='protect /assets' \
             --filter='protect /.gitignore' \
             source/obsidian-aether-plugin/ target/
