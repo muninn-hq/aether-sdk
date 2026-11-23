@@ -44,15 +44,16 @@ pub fn run_uninstall(parsed: &CliArgs) -> Result<()> {
     lines.extend(remove_vault_files(parsed));
     ui.print(&lines);
     let program = std::env::current_exe().unwrap_or_else(|_| PathBuf::from("aether-mcp"));
-    ui.note(
-        "Still to do",
-        &format!(
-            "Remove the AMC plugin in Obsidian, and remove it from BRAT too if you installed it there.\n{}",
-            program_removal_hint(&program)
-        ),
-    );
+    ui.note("Still to do", &still_to_do_note(&program));
     ui.outro("Uninstall finished");
     Ok(())
+}
+
+fn still_to_do_note(program: &Path) -> String {
+    format!(
+        "Uninstall Aether Memory in Obsidian under Settings, Community plugins.\n{}",
+        program_removal_hint(program)
+    )
 }
 
 /// Removes the `aether-vault` entry from every MCP client config that has one.
@@ -154,7 +155,7 @@ fn program_removal_hint(exe: &Path) -> String {
     }
 }
 
-/// Deletes the AMC plugin folder from the vault. Returns whether anything was removed.
+/// Deletes the Aether Memory plugin folder from the vault. Returns whether anything was removed.
 pub fn remove_vault_plugin(vault: &Path) -> std::io::Result<bool> {
     remove_dir_if_exists(
         &vault
@@ -289,5 +290,16 @@ mod tests {
     fn rejects_configs_that_are_not_json_objects() {
         assert!(remove_mcp_server_from_config("not json", "aether-vault").is_err());
         assert!(remove_mcp_server_from_config("[]", "aether-vault").is_err());
+    }
+
+    #[test]
+    fn still_to_do_note_points_to_obsidian_community_plugins_instead_of_brat() {
+        let note = still_to_do_note(Path::new("/usr/local/bin/aether-mcp"));
+        assert!(note.contains("Aether Memory"), "got: {note}");
+        assert!(note.contains("Community plugins"), "got: {note}");
+        assert!(
+            !note.to_ascii_lowercase().contains("brat"),
+            "unexpected BRAT reference: {note}"
+        );
     }
 }
