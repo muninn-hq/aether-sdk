@@ -79,7 +79,7 @@ function createMockHost() {
 }
 
 describe('Aether Obsidian Companion Plugin', () => {
-  it('defaults control-plane endpoint URL to loopback port 14771 across client, plugin, and settings', () => {
+  it('defaults control-plane endpoint URL to loopback port 14771 across client, plugin, and settings', async () => {
     const mock = createMockHost();
     assert.equal(DEFAULT_SETTINGS.endpointUrl, 'http://127.0.0.1:14771');
     assert.equal(normalizePluginSettings(null).endpointUrl, 'http://127.0.0.1:14771');
@@ -93,6 +93,7 @@ describe('Aether Obsidian Companion Plugin', () => {
     );
     assert.equal(new AetherControlClient().baseUrl, 'http://127.0.0.1:14771');
     assert.equal(new AetherCompanionPlugin(mock.host).client.baseUrl, 'http://127.0.0.1:14771');
+    await assert.rejects(() => new AetherControlClient().getStatus(), /fetchImpl/);
   });
 
   it('enforces loopback URLs and rejects remote hosts', () => {
@@ -196,7 +197,7 @@ describe('Aether Obsidian Companion Plugin', () => {
       assert.ok(addr && typeof addr === 'object');
       const baseUrl = `http://127.0.0.1:${addr.port}`;
       const mock = createMockHost();
-      const plugin = new AetherCompanionPlugin(mock.host, baseUrl);
+      const plugin = new AetherCompanionPlugin(mock.host, baseUrl, fetch);
       await plugin.onload();
 
       assert.equal(mock.statusTexts.at(-1), 'Aether: Idle');
@@ -364,6 +365,7 @@ describe('Aether Obsidian Companion Plugin', () => {
       const baseUrl = `http://127.0.0.1:${addr.port}`;
       const mock = createMockHost();
       const plugin = new AetherCompanionPlugin(mock.host, baseUrl, {
+        fetchImpl: fetch,
         apiKey: 'aek_team_secret_0001',
         defaultKvModel: 'qwen2.5-coder',
       });
@@ -417,6 +419,18 @@ describe('Aether Obsidian Companion Plugin', () => {
     assert.equal(isIgnoredVaultPath('Finance/2026.md', ignoreFile), true);
     assert.equal(isIgnoredVaultPath('Personal/keys.secret.md', ignoreFile), true);
     assert.equal(isIgnoredVaultPath('Arch/DB.md', ignoreFile), false);
+    assert.equal(
+      isIgnoredVaultPath('my-obsidian-config/notes.md', undefined, 'my-obsidian-config'),
+      true,
+    );
+    assert.equal(
+      isIgnoredVaultPath(
+        'my-obsidian-config/plugins/aether-memory/data.json',
+        undefined,
+        'my-obsidian-config',
+      ),
+      true,
+    );
 
     const h1 = await computeSha256Hex('aether');
     const h2 = await computeSha256Hex('aether');
@@ -615,7 +629,7 @@ describe('Aether Obsidian Companion Plugin', () => {
     try {
       const addr = server.address();
       assert.ok(addr && typeof addr === 'object');
-      const plugin = new AetherCompanionPlugin(host, `http://127.0.0.1:${addr.port}`);
+      const plugin = new AetherCompanionPlugin(host, `http://127.0.0.1:${addr.port}`, fetch);
       await plugin.onload();
 
       const syncCmd = commands.get('aether-sync-vault');
@@ -721,6 +735,7 @@ describe('Aether Obsidian Companion Plugin', () => {
 
     const mockApp = {
       vault: {
+        configDir: '.obsidian-custom',
         getMarkdownFiles() {
           return [...files.keys()]
             .filter((p) => p.toLowerCase().endsWith('.md'))
@@ -768,6 +783,11 @@ describe('Aether Obsidian Companion Plugin', () => {
       },
     };
 
+    const NODE_TIMERS = {
+      setTimeout: (cb: () => void, ms: number) => setTimeout(cb, ms) as unknown as number,
+      clearTimeout: (id: number) => clearTimeout(id),
+    };
+
     const adapter = new ObsidianDesktopAdapter({
       app: mockApp as never,
       registerEvent(ref) {
@@ -781,7 +801,9 @@ describe('Aether Obsidian Companion Plugin', () => {
       openInboxPane() {},
       debounceMs: 25,
       isLiveSyncEnabled: () => true,
+      timers: NODE_TIMERS,
     });
+    assert.equal(adapter.configDir, '.obsidian-custom');
 
     const content = await adapter.readFile('./Arch/DB.md');
     assert.equal(content, '# DB\nInitial WAL text.\n');
@@ -829,7 +851,7 @@ describe('Aether Obsidian Companion Plugin', () => {
     await new Promise((resolve) => setTimeout(resolve, 50));
     assert.equal(dispatched.length, 3);
 
-    const debouncer = new PathDebouncer(50);
+    const debouncer = new PathDebouncer(50, undefined, NODE_TIMERS);
     let flushedCount = 0;
     debouncer.enqueue({kind: 'modify', path: 'x.md'}, async () => {
       flushedCount += 1;
@@ -1127,7 +1149,7 @@ describe('Aether Obsidian Release Verification', () => {
   it('verifies tracked plugin files before build and full release directory when main.js is built', () => {
     const pluginRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
     const hasBundle = fs.existsSync(path.join(pluginRoot, 'main.js'));
-    const report = verifyReleaseDirectory(pluginRoot, {tag: '0.4.4'});
+    const report = verifyReleaseDirectory(pluginRoot, {tag: '0.4.5'});
 
     if (hasBundle) {
       assert.equal(report.ok, true, formatVerificationReport(report));
@@ -1178,8 +1200,8 @@ describe('community plugin manifest', () => {
     assert.ok(manifest.description.length <= 250, 'description must be at most 250 characters');
     assert.ok(manifest.description.endsWith('.'), 'description must end with a period');
     assert.match(manifest.description, /^Give your AI agents memory/);
-    // Obsidian prefixes every command with the manifest name, so keep it short; the description carries the search keywords.
-    assert.equal(manifest.name, 'AMC');
+    // Keep the manifest name concise and non-all-caps; the description carries additional search keywords.
+    assert.equal(manifest.name, 'Aether Memory');
     assert.match(manifest.description, /Aether|MCP|memory/i);
     assert.doesNotMatch(manifest.description, /obsidian/i);
   });
@@ -1332,13 +1354,18 @@ describe('inbox pane rendering', () => {
     disabled = false;
     attrs: Record<string, string> = {};
     onclick: (() => unknown) | null = null;
-    ownerDocument: {createElement(tag: string): FakeEl};
     tag: string;
-    constructor(ownerDocument: {createElement(tag: string): FakeEl}, tag: string) {
-      this.ownerDocument = ownerDocument;
+    constructor(tag: string) {
       this.tag = tag;
     }
-    appendChild(child: FakeEl): FakeEl {
+    createEl(tag: string, opts?: {cls?: string; text?: string}): FakeEl {
+      const child = new FakeEl(tag);
+      if (opts?.cls) {
+        child.className = opts.cls;
+      }
+      if (opts?.text !== undefined) {
+        child.textContent = opts.text;
+      }
       this.children.push(child);
       return child;
     }
@@ -1349,8 +1376,7 @@ describe('inbox pane rendering', () => {
       this.attrs[name] = value;
     }
   }
-  const doc = {createElement: (tag: string) => new FakeEl(doc, tag)};
-  const root = (): FakeEl => new FakeEl(doc, 'div');
+  const root = (): FakeEl => new FakeEl('div');
   const textOf = (el: FakeEl): string => [el.textContent, ...el.children.map(textOf)].filter(Boolean).join(' ');
   const find = (el: FakeEl, pred: (e: FakeEl) => boolean): FakeEl[] =>
     [el, ...el.children.flatMap((c) => find(c, pred))].filter(pred);

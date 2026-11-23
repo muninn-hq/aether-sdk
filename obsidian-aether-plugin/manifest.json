@@ -1,10 +1,10 @@
 {
   "id": "aether-memory",
-  "name": "AMC",
-  "version": "0.4.4",
-  "minAppVersion": "1.5.0",
+  "name": "Aether Memory",
+  "version": "0.4.5",
+  "minAppVersion": "1.7.2",
   "description": "Give your AI agents memory from your vault via MCP. Syncs notes to a local aether-mcp server and keeps private notes on disk.",
   "author": "Muninn Labs",
-  "authorUrl": "https://github.com/muninn-hq/aether-sdk",
+  "authorUrl": "https://github.com/muninn-hq",
   "isDesktopOnly": true
 }

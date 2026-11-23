@@ -74,7 +74,10 @@ export function assertControlPlaneBaseUrl(
   return parsed.origin;
 }
 
-export type FetchLike = typeof fetch;
+export type FetchLike = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
+
+const UNCONFIGURED_TRANSPORT: FetchLike = () =>
+  Promise.reject(new Error('AetherControlClient requires a fetchImpl transport'));
 
 export interface AetherClientOptions {
   fetchImpl?: FetchLike;
@@ -95,7 +98,7 @@ export class AetherControlClient {
 
   constructor(
     baseUrl = DEFAULT_CONTROL_PLANE_URL,
-    fetchOrOptions: FetchLike | AetherClientOptions = fetch,
+    fetchOrOptions: FetchLike | AetherClientOptions = UNCONFIGURED_TRANSPORT,
   ) {
     const opts: AetherClientOptions =
       typeof fetchOrOptions === 'function' ? {fetchImpl: fetchOrOptions} : fetchOrOptions;
@@ -104,7 +107,7 @@ export class AetherControlClient {
       apiKey: trimmedKey,
       allowInsecureRemoteHttp: opts.allowInsecureRemoteHttp,
     });
-    this.fetchImpl = opts.fetchImpl ?? fetch;
+    this.fetchImpl = opts.fetchImpl ?? UNCONFIGURED_TRANSPORT;
     this.apiKey = trimmedKey ?? null;
   }
 

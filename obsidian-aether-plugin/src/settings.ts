@@ -1,4 +1,4 @@
-import {type App, Notice, Plugin, PluginSettingTab, Setting} from 'obsidian';
+import {type App, Notice, Platform, Plugin, PluginSettingTab, Setting} from 'obsidian';
 import {
   AETHER_MCP_INSTALL_COMMAND,
   AETHER_MCP_WINDOWS_INSTALL_COMMAND,
@@ -90,9 +90,7 @@ export class AetherSettingTab extends PluginSettingTab {
       )
       .addButton((btn) =>
         btn.setButtonText('Copy install').onClick(async () => {
-          const isWindows =
-            typeof navigator !== 'undefined' && navigator.platform.toLowerCase().includes('win');
-          const cmd = isWindows ? AETHER_MCP_WINDOWS_INSTALL_COMMAND : AETHER_MCP_INSTALL_COMMAND;
+          const cmd = Platform.isWin ? AETHER_MCP_WINDOWS_INSTALL_COMMAND : AETHER_MCP_INSTALL_COMMAND;
           await copyCommandToClipboard(cmd, 'install command');
         }),
       )
