@@ -93,7 +93,7 @@ jobs:
           if-no-files-found: error
 
       - name: Publish GitHub release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ steps.meta.outputs.tag }}
           name: Aether Memory Companion ${{ steps.meta.outputs.tag }}
@@ -198,7 +198,7 @@ jobs:
 
       - name: Publish GitHub release to dedicated Obsidian repository
         if: env.HAS_SYNC_TOKEN == 'true'
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           repository: ${{ vars.OBSIDIAN_PLUGIN_REPO }}
           token: ${{ secrets.OBSIDIAN_PLUGIN_SYNC_TOKEN }}
