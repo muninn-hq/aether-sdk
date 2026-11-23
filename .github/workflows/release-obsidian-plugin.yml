@@ -80,7 +80,6 @@ jobs:
           cp \
             obsidian-aether-plugin/main.js \
             obsidian-aether-plugin/manifest.json \
-            obsidian-aether-plugin/versions.json \
             obsidian-aether-plugin/styles.css \
             release-assets/
 
@@ -105,7 +104,6 @@ jobs:
           files: |
             obsidian-aether-plugin/main.js
             obsidian-aether-plugin/manifest.json
-            obsidian-aether-plugin/versions.json
             obsidian-aether-plugin/styles.css
 
   sync-obsidian-repo:
@@ -209,5 +207,4 @@ jobs:
           files: |
             release-assets/main.js
             release-assets/manifest.json
-            release-assets/versions.json
             release-assets/styles.css
