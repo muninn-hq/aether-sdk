@@ -17,7 +17,7 @@ use super::{
     CliArgs, ServiceAction,
 };
 
-const PLUGIN_REPO_URL: &str = "https://github.com/muninn-hq/aether-memory";
+const PLUGIN_DIRECTORY_URL: &str = "https://community.obsidian.md/plugins/aether-memory";
 const QUICKSTART_URL: &str = "https://muninn-hq.github.io/aether-sdk/docs/get-started/quickstart";
 
 /// Vault paths listed in Obsidian's `obsidian.json`, most recently used first.
@@ -207,7 +207,7 @@ pub fn apply_setup(
 
 fn next_steps() -> String {
     format!(
-        "1. In Obsidian, install the Obsidian42 BRAT plugin, choose Add beta plugin, and enter {PLUGIN_REPO_URL}\n2. Enable AMC under Settings, Community plugins\n3. Ask your agent a question your notes answer\n\nGuide: {QUICKSTART_URL}"
+        "1. In Obsidian, open Settings, Community plugins, Browse, and install Aether Memory ({PLUGIN_DIRECTORY_URL})\n2. Enable Aether Memory under Settings, Community plugins\n3. Ask your agent a question your notes answer\n\nGuide: {QUICKSTART_URL}"
     )
 }
 
@@ -517,5 +517,20 @@ mod tests {
         assert!(!second
             .iter()
             .any(|l| l.text.starts_with("MCP client configured")));
+    }
+
+    #[test]
+    fn next_steps_points_to_obsidian_community_plugins_instead_of_brat() {
+        let text = next_steps();
+        assert!(text.contains("Community plugins"), "got: {text}");
+        assert!(text.contains("Aether Memory"), "got: {text}");
+        assert!(
+            text.contains("https://community.obsidian.md/plugins/aether-memory"),
+            "got: {text}"
+        );
+        assert!(
+            !text.to_ascii_lowercase().contains("brat"),
+            "unexpected BRAT reference: {text}"
+        );
     }
 }

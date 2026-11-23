@@ -5,7 +5,7 @@ sidebar_position: 1
 # Quickstart
 
 Get an AI agent to recall your Obsidian notes in about five minutes.
-You need Obsidian Desktop 1.5.0 or later and an MCP client such as Cursor, Claude Desktop, Claude Code, or Antigravity.
+You need Obsidian Desktop 1.7.2 or later and an MCP client such as Cursor, Claude Desktop, Claude Code, or Antigravity.
 You do not need Rust.
 
 1. **Install `aether-mcp` and run the guided setup.**
@@ -21,13 +21,13 @@ You do not need Rust.
    Prefer Node.js? Skip the installer and run `npm install -g @muninn-org/aether-mcp`, then `aether-mcp setup`.
    On Windows, use the PowerShell installer in [Install aether-mcp](./install-aether-mcp.md).
 
-2. **Install AMC in Obsidian.**
-   Install **Obsidian42 BRAT**, choose **Add beta plugin**, and enter `https://github.com/muninn-hq/aether-memory`.
-   Then enable **AMC** under **Settings**, **Community plugins**.
+2. **Install Aether Memory in Obsidian.**
+   Open **Settings**, then **Community plugins**, select **Browse**, and search for **Aether Memory** (or open [Aether Memory in the Obsidian Community directory](https://community.obsidian.md/plugins/aether-memory)).
+   Select **Install**, then **Enable**.
    Details are in [Install AMC](./install-amc.md).
 
 3. **Check the connection.**
-   Open **Settings**, then **AMC**.
+   Open **Settings**, then **Aether Memory**.
    The card at the top should say **Connected to aether-mcp**.
 
 4. **Restart your agent.**

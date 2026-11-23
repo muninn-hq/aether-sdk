@@ -2,29 +2,27 @@
 sidebar_position: 3
 ---
 
-# Install AMC in Obsidian
+# Install Aether Memory in Obsidian
 
-**AMC** (Aether Memory Companion, plugin id `aether-memory`) syncs your vault to `aether-mcp` and lets you review the memories your agents propose.
-It requires Obsidian Desktop 1.5.0 or later. Mobile is not supported.
+**Aether Memory** (formerly **AMC** / Aether Memory Companion, plugin id `aether-memory`) syncs your vault to `aether-mcp` and lets you review the memories your agents propose.
+It requires Obsidian Desktop 1.7.2 or later. Mobile is not supported.
 
 ## Install the plugin
 
-The Obsidian Community plugins listing is pending review, so install through one of these methods for now.
-
-- **BRAT (beta).** Install **Obsidian42 BRAT**, choose **Add beta plugin**, and enter `https://github.com/muninn-hq/aether-memory`.
-- **From a local build.** If you built the plugin from `obsidian-aether-plugin/`, run `aether-mcp --init --install-clients --vault /path/to/vault --http-addr 127.0.0.1:14771`.
-  It copies `main.js`, `manifest.json`, and `styles.css`, writes `data.json`, configures detected MCP clients, and prints an `mcp.json` snippet.
-
-Then enable the plugin:
-
-1. Open `/path/to/vault` as a vault in Obsidian.
+1. Open your vault in Obsidian Desktop.
 2. Open **Settings**, then **Community plugins**.
 3. Turn off Restricted Mode if Obsidian prompts you.
-4. Enable **AMC**.
+4. Select **Browse**, search for **Aether Memory** (or open [Aether Memory in the Obsidian Community directory](https://community.obsidian.md/plugins/aether-memory)), and select **Install**.
+5. Select **Enable**.
+
+### Alternative: install from a local build
+
+If you built the plugin from `obsidian-aether-plugin/`, run `aether-mcp --init --install-clients --vault /path/to/vault --http-addr 127.0.0.1:14771`.
+It copies `main.js`, `manifest.json`, and `styles.css`, writes `data.json`, configures detected MCP clients, and prints an `mcp.json` snippet. Then enable **Aether Memory** under **Settings**, **Community plugins**.
 
 ## Connect to the server
 
-Open **Settings**, then **AMC**.
+Open **Settings**, then **Aether Memory**.
 
 1. Leave **Aether control-plane URL** at `http://127.0.0.1:14771` for a local server, or enter your `https://` gateway URL for a remote one.
 2. Leave **API key** empty for a local server without authentication.
