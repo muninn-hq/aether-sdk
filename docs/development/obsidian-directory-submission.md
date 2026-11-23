@@ -1,7 +1,8 @@
-# Submit AMC to the Obsidian directory
+# Submit Aether Memory to the Obsidian directory
 
-This page is the working checklist and the text to paste when submitting the plugin to the Obsidian community plugin directory.
-Do the BRAT soak first, then submit.
+> **Status: Published (`0.4.5`).** Live in the Obsidian Community directory at [community.obsidian.md/plugins/aether-memory](https://community.obsidian.md/plugins/aether-memory).
+
+This page documents the directory listing values and reviewer notes used when submitting the plugin to the Obsidian community plugin directory.
 
 ## Which process to use
 
@@ -20,30 +21,29 @@ Read both on the day of submission and check the items they list against [Review
 | Plugin repository is public with `README.md`, `LICENSE`, and `manifest.json` at the root | Done: `muninn-hq/aether-memory`, Apache-2.0 |
 | `manifest.json` on the default branch matches the release version | Check: it must equal the release tag |
 | GitHub release tag equals the manifest `version` (bare `x.y.z`) | Done for `0.4.1`; repeat for the release you submit |
-| Release assets `main.js`, `manifest.json`, `styles.css` | Done: also `versions.json` |
-| `id` is unique and does not contain `obsidian` | Done: `aether-memory`, not present in `community-plugins.json` |
+| Release assets `main.js`, `manifest.json`, `styles.css` | Done |
+| `id` is unique and does not contain `obsidian` | Done: `aether-memory`, published in `community.obsidian.md` |
 | `description` is at most 250 characters and ends with a period | Done: enforced by a test |
-| UI text in sentence case | Done in the sentence case change; release it before submitting |
+| UI text in sentence case | Done |
 | No global `app`, no console output, no inline styles, no `innerHTML`, no default hotkeys, no leaf detaching | Done: audited |
 | Network calls use `requestUrl` | Done |
 | `isDesktopOnly` matches reality | Done: `true` |
 | Private-note data loss bug fixed | Done in `0.4.1` |
-| BRAT soak with real vaults for several days | Open |
+| Automated directory scan passed | Done in `0.4.5` |
 
 ## Form values
 
 | Field | Value |
 | --- | --- |
 | Plugin id | `aether-memory` |
-| Name | `AMC` |
+| Name | `Aether Memory` |
 | Author | `Muninn Labs` |
 | Repository | `muninn-hq/aether-memory` |
 | Description | `Give your AI agents memory from your vault via MCP. Syncs notes to a local aether-mcp server and keeps private notes on disk.` |
-| Minimum Obsidian version | `1.5.0` |
+| Minimum Obsidian version | `1.7.2` |
 | Desktop only | Yes |
 
-The name is short on purpose, because Obsidian prefixes every command in the palette with it ("AMC: Sync vault with Aether").
-Directory search uses the name, author, and description, so the description keeps the words Aether, MCP, and memory.
+Directory search uses the name, author, and description, so the name and description keep Aether, MCP, and memory.
 
 ## Reviewer notes
 
