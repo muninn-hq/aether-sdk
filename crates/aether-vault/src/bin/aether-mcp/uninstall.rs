@@ -60,7 +60,7 @@ fn still_to_do_note(program: &Path) -> String {
 fn remove_client_entries() -> Result<Vec<Line>> {
     let home = super::resolve_home_dir()?;
     let mut lines = Vec::new();
-    for (name, _dir, config_path) in known_mcp_client_configs(&home) {
+    for (name, _dir, config_path) in known_mcp_client_configs(&home, &super::env_non_empty) {
         if !config_path.is_file() {
             continue;
         }
