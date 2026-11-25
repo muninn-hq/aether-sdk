@@ -16,7 +16,7 @@ Output is plain text when it is piped, when `NO_COLOR` is set, or when `TERM` is
 
 | CLI flag | Environment variable | Default | Description |
 | --- | --- | --- | --- |
-| `--vault <path>` | `AETHER_VAULT_PATH` | `.` | Root directory of the Obsidian Markdown vault |
+| `--vault <path>` | `AETHER_VAULT_PATH` | `~/.aether/vault` (`.` when neither `HOME` nor `USERPROFILE` is set) | Root directory of the Obsidian Markdown vault |
 | `--db <path>` | None | `<vault>/.aether/aether.sqlite` | SQLite WAL index database path |
 | `--watch-ms <ms>` | None | `2000` | Vault polling interval in milliseconds (`0` disables polling) |
 | `--http-addr <addr>` | `AETHER_HTTP_ADDR` | Disabled | Bind `SocketAddr` for `ControlPlaneServer` (e.g. `127.0.0.1:14771`) |
@@ -38,9 +38,6 @@ Output is plain text when it is piped, when `NO_COLOR` is set, or when `TERM` is
 | `aether-mcp setup [--vault <path>] [--yes] [--no-clients] [--no-service]` | Guided first-run setup: finds your Obsidian vaults (or lets you pick the current folder, browse for one, or type a path), installs the background service, offers a checklist of detected MCP clients to add `aether-vault` to, checks the result, and prints the next steps. `--yes` accepts the defaults and configures every detected client. Without a terminal and without `--yes` it exits with an explanation |
 | `aether-mcp uninstall [--vault <path>] [--purge-vault] [--yes]` | Stops and removes the background service, removes `aether-vault` from MCP client configs (other servers are kept), and prints how to remove the program. With `--vault`, also removes the vault's AMC plugin files; `--purge-vault` also deletes its `.aether/` index and `Aether/` folder. Notes are never deleted. Asks for confirmation unless `--yes` is given |
 | `aether-mcp doctor [--vault <path>]` | Checks the vault, the binary, and detected MCP client configs, with a fix hint beside each problem |
-| `aether-mcp completions <bash\|zsh\|fish\|powershell\|elvish>` | Prints a shell completion script to stdout |
-| `aether-mcp --help`, `aether-mcp --version` | Prints usage or the version |
-| `aether-mcp doctor [--vault <path>]` | Checks the vault, the binary, and detected MCP client configs |
 | `aether-mcp completions <bash\|zsh\|fish\|powershell\|elvish>` | Prints a shell completion script to stdout |
 | `aether-mcp --help`, `aether-mcp --version` | Prints usage or the version |
 | `npx @muninn-org/aether-mcp` | Runs the matching release binary through Node.js, downloading and verifying it on first use. See [Install aether-mcp](../get-started/install-aether-mcp.md) |

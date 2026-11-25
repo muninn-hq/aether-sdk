@@ -226,7 +226,7 @@ cargo run -p muninn-aether-vault --bin aether-mcp -- \
   --kv-model llama-3.1-8b
 ```
 
-When `--vault` is omitted, `aether-mcp` reads `AETHER_VAULT_PATH` or falls back to `.`. It serves newline-delimited JSON-RPC 2.0 (`protocolVersion` `"2024-11-05"`) over `stdin` and `stdout` with three tools. Passing `--api-key` (or `AETHER_API_KEY`) binds the stdio session to a validated `ScopedApiKey`.
+When `--vault` is omitted, `aether-mcp` reads `AETHER_VAULT_PATH` or falls back to `~/.aether/vault`. It serves newline-delimited JSON-RPC 2.0 (`protocolVersion` `"2024-11-05"`) over `stdin` and `stdout` with three tools. Passing `--api-key` (or `AETHER_API_KEY`) binds the stdio session to a validated `ScopedApiKey`.
 
 - `aether_recall` accepts `query` (required), `scope` (optional), `max_tokens` (optional, default `1500`), `include_hot_profile` (optional, default `true`), `structured` (optional, default `false` to emit JSON separating `static_prefix`, `dynamic_context`, and `prefix_hash`; `structuredContent` is always included), and `kv_model` (optional target model for `kv_hint` block reuse metadata).
 - `aether_stage_memory` accepts `proposed_fact` (required), `suggested_tier` (optional `"hot"`, `"warm"`, or `"cold"`, default `"warm"`), `scope` (optional, defaulting to `agent.default_write_scope()` on scoped sessions), `target_note` (optional), and `supersedes_amu_id` (optional). It appends a pending candidate to `Aether/Inbox.md`.
