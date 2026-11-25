@@ -107,14 +107,14 @@ fn run_init(parsed: &CliArgs) -> Result<()> {
     let exe = std::env::current_exe().unwrap_or_else(|_| PathBuf::from("aether-mcp"));
     let mut report = init_vault_plugin(parsed, &cwd, &exe)?;
     if parsed.install_clients {
-        let home = resolve_home_dir()?;
+        let clients = known_mcp_client_configs(&resolve_home_dir()?, &env_non_empty);
         if let Some(entry) = report
             .mcp_config
             .get("mcpServers")
             .and_then(|m| m.get("aether-vault"))
         {
             report.installed_clients =
-                install_mcp_clients(&home, entry, &detected_client_names(&home))?;
+                install_mcp_clients(&clients, entry, &detected_client_names(&clients))?;
         }
     }
     print_init_report(&report, parsed, &exe)
@@ -486,18 +486,34 @@ where
         .unwrap_or_else(|| PathBuf::from("."))
 }
 
-fn known_mcp_client_configs(home_dir: &Path) -> Vec<(&'static str, PathBuf, PathBuf)> {
+/// An MCP client: its name, the folder that shows it is installed, and its config file.
+type McpClient = (&'static str, PathBuf, PathBuf);
+
+/// The MCP clients aether-mcp knows, located from `home_dir` and the environment that `env`
+/// reads, so callers resolve them once and tests do not depend on the ambient environment.
+fn known_mcp_client_configs<F>(home_dir: &Path, env: &F) -> Vec<McpClient>
+where
+    F: Fn(&str) -> Option<String>,
+{
     let mut clients = vec![
         (
             "Cursor",
             home_dir.join(".cursor"),
             home_dir.join(".cursor").join("mcp.json"),
         ),
-        (
-            "Claude Code",
-            home_dir.join(".claude"),
-            home_dir.join(".claude.json"),
-        ),
+        // Claude Code keeps `.claude.json` inside CLAUDE_CONFIG_DIR when it is set.
+        match env("CLAUDE_CONFIG_DIR").filter(|v| !v.trim().is_empty()) {
+            Some(dir) => (
+                "Claude Code",
+                PathBuf::from(&dir),
+                Path::new(&dir).join(".claude.json"),
+            ),
+            None => (
+                "Claude Code",
+                home_dir.join(".claude"),
+                home_dir.join(".claude.json"),
+            ),
+        },
         (
             "Antigravity",
             home_dir.join(".gemini").join("antigravity"),
@@ -527,15 +543,13 @@ fn known_mcp_client_configs(home_dir: &Path) -> Vec<(&'static str, PathBuf, Path
                 .join("claude_desktop_config.json"),
         ),
     ];
-    if let Ok(appdata) = std::env::var("APPDATA") {
-        if !appdata.trim().is_empty() {
-            let claude_dir = PathBuf::from(appdata).join("Claude");
-            clients.push((
-                "Claude Desktop (Windows)",
-                claude_dir.clone(),
-                claude_dir.join("claude_desktop_config.json"),
-            ));
-        }
+    if let Some(appdata) = env("APPDATA").filter(|v| !v.trim().is_empty()) {
+        let claude_dir = PathBuf::from(appdata).join("Claude");
+        clients.push((
+            "Claude Desktop (Windows)",
+            claude_dir.clone(),
+            claude_dir.join("claude_desktop_config.json"),
+        ));
     }
     clients
 }
@@ -577,24 +591,89 @@ fn merge_mcp_server_into_config(
     Ok(rendered)
 }
 
+/// Flags of an existing `aether-vault` entry that are kept when this run does not pass them.
+/// `--db` names one vault's index, so it is kept only while the vault stays the same.
+const KEPT_ENTRY_FLAGS: [&str; 4] = ["--db", "--api-key", "--kv-endpoint", "--kv-model"];
+
+/// The `flag value` or `flag=value` arguments for the first `flag` in `args`.
+fn flag_args(args: &[Value], flag: &str) -> Vec<Value> {
+    let inline = format!("{flag}=");
+    for (idx, arg) in args.iter().enumerate() {
+        match arg.as_str() {
+            Some(s) if s == flag => return args[idx..args.len().min(idx + 2)].to_vec(),
+            Some(s) if s.starts_with(&inline) => return vec![arg.clone()],
+            _ => {}
+        }
+    }
+    Vec::new()
+}
+
+/// The `aether-vault` entry to write over `existing`: `command`, `--vault`, `--watch-ms`, and
+/// every flag passed on this run come from `desired`. Other keys, environment variables, and
+/// the flags in [`KEPT_ENTRY_FLAGS`] stay as the user left them.
+fn merge_aether_entry(existing: &Value, desired: &Value) -> Value {
+    let (Some(old), Some(new)) = (existing.as_object(), desired.as_object()) else {
+        return desired.clone();
+    };
+    let old_args = old
+        .get("args")
+        .and_then(Value::as_array)
+        .map(Vec::as_slice)
+        .unwrap_or_default();
+    let mut args = new
+        .get("args")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    let same_vault = flag_args(old_args, "--vault") == flag_args(&args, "--vault");
+    for flag in KEPT_ENTRY_FLAGS {
+        if (flag == "--db" && !same_vault) || !flag_args(&args, flag).is_empty() {
+            continue;
+        }
+        args.extend(flag_args(old_args, flag));
+    }
+
+    let mut merged = old.clone();
+    for (key, value) in new {
+        if key != "env" {
+            merged.insert(key.clone(), value.clone());
+        }
+    }
+    merged.insert("args".to_string(), Value::Array(args));
+    let mut env = old
+        .get("env")
+        .and_then(Value::as_object)
+        .cloned()
+        .unwrap_or_default();
+    if let Some(new_env) = new.get("env").and_then(Value::as_object) {
+        env.extend(new_env.clone());
+    }
+    if !env.is_empty() {
+        merged.insert("env".to_string(), Value::Object(env));
+    }
+    Value::Object(merged)
+}
+
 /// Names of the MCP clients that have a config file or a folder on this machine.
-fn detected_client_names(home_dir: &Path) -> Vec<&'static str> {
-    known_mcp_client_configs(home_dir)
-        .into_iter()
+fn detected_client_names(clients: &[McpClient]) -> Vec<&'static str> {
+    clients
+        .iter()
         .filter(|(_, dir, file)| dir.is_dir() || file.is_file())
-        .map(|(name, _, _)| name)
+        .map(|(name, _, _)| *name)
         .collect()
 }
 
-/// Adds the server entry to the detected clients whose names are in `selected`.
+/// Writes the server entry to the detected clients whose names are in `selected`, merged
+/// with any existing entry as [`merge_aether_entry`] describes. Returns the files it changed:
+/// a client whose entry is already up to date is left alone.
 fn install_mcp_clients(
-    home_dir: &Path,
+    clients: &[McpClient],
     server_entry: &Value,
     selected: &[&str],
 ) -> Result<Vec<PathBuf>> {
     let mut updated = Vec::new();
-    for (name, marker_dir, config_path) in known_mcp_client_configs(home_dir) {
-        if !selected.contains(&name) {
+    for (name, marker_dir, config_path) in clients {
+        if !selected.contains(name) {
             continue;
         }
         if !marker_dir.is_dir() && !config_path.is_file() {
@@ -608,7 +687,7 @@ fn install_mcp_clients(
         }
         let existing = if config_path.is_file() {
             Some(
-                fs::read_to_string(&config_path).map_err(|err| AetherError::Permanent {
+                fs::read_to_string(config_path).map_err(|err| AetherError::Permanent {
                     connector: "aether-init",
                     message: format!("failed to read `{}`: {err}", config_path.display()),
                 })?,
@@ -616,10 +695,20 @@ fn install_mcp_clients(
         } else {
             None
         };
-        let rendered =
-            merge_mcp_server_into_config(existing.as_deref(), "aether-vault", server_entry)?;
-        write_file_atomic(&config_path, rendered.as_bytes())?;
-        updated.push(config_path);
+        let current = existing
+            .as_deref()
+            .and_then(|raw| serde_json::from_str::<Value>(raw).ok())
+            .and_then(|config| config.get("mcpServers")?.get("aether-vault").cloned());
+        let entry = match &current {
+            Some(current) => merge_aether_entry(current, server_entry),
+            None => server_entry.clone(),
+        };
+        if current.as_ref() == Some(&entry) {
+            continue;
+        }
+        let rendered = merge_mcp_server_into_config(existing.as_deref(), "aether-vault", &entry)?;
+        write_file_atomic(config_path, rendered.as_bytes())?;
+        updated.push(config_path.clone());
     }
     Ok(updated)
 }
@@ -632,25 +721,23 @@ struct DoctorReport {
     configured_clients: Vec<(&'static str, PathBuf, bool)>,
 }
 
-fn collect_doctor_report(vault_root: &Path, home_dir: Option<&Path>) -> Result<DoctorReport> {
+fn collect_doctor_report(vault_root: &Path, clients: &[McpClient]) -> Result<DoctorReport> {
     let vault_exists = vault_root.is_dir();
     let sqlite_exists = vault_root.join(".aether").join("aether.sqlite").is_file();
     let mut configured_clients = Vec::new();
 
-    if let Some(home) = home_dir {
-        for (name, marker_dir, config_path) in known_mcp_client_configs(home) {
-            if !marker_dir.is_dir() && !config_path.is_file() {
-                continue;
-            }
-            let has_aether = config_path
-                .is_file()
-                .then(|| fs::read_to_string(&config_path).ok())
-                .flatten()
-                .and_then(|raw| serde_json::from_str::<Value>(&raw).ok())
-                .and_then(|val| val.get("mcpServers")?.get("aether-vault").cloned())
-                .is_some();
-            configured_clients.push((name, config_path, has_aether));
+    for (name, marker_dir, config_path) in clients {
+        if !marker_dir.is_dir() && !config_path.is_file() {
+            continue;
         }
+        let has_aether = config_path
+            .is_file()
+            .then(|| fs::read_to_string(config_path).ok())
+            .flatten()
+            .and_then(|raw| serde_json::from_str::<Value>(&raw).ok())
+            .and_then(|val| val.get("mcpServers")?.get("aether-vault").cloned())
+            .is_some();
+        configured_clients.push((*name, config_path.clone(), has_aether));
     }
 
     Ok(DoctorReport {
@@ -710,8 +797,10 @@ fn run_doctor(parsed: &CliArgs) -> Result<()> {
         message: format!("failed to resolve current directory: {err}"),
     })?;
     let vault = absolutize_path(&parsed.vault_root, &cwd);
-    let home = home_dir_from_env(&env_non_empty);
-    let report = collect_doctor_report(&vault, home.as_deref())?;
+    let clients = home_dir_from_env(&env_non_empty)
+        .map(|home| known_mcp_client_configs(&home, &env_non_empty))
+        .unwrap_or_default();
+    let report = collect_doctor_report(&vault, &clients)?;
     let exe = std::env::current_exe().unwrap_or_else(|_| PathBuf::from("aether-mcp"));
 
     let lines = doctor_lines(&report, &exe);
@@ -1108,10 +1197,9 @@ fn run_service(action: ServiceAction, parsed: &CliArgs) -> Result<()> {
                     }
                 })?;
                 run_command_checked("systemctl", &["--user", "daemon-reload"])?;
-                run_command_checked(
-                    "systemctl",
-                    &["--user", "enable", "--now", "aether-mcp.service"],
-                )?;
+                run_command_checked("systemctl", &["--user", "enable", "aether-mcp.service"])?;
+                // `enable --now` leaves a running service on the old definition; restart applies it.
+                run_command_checked("systemctl", &["--user", "restart", "aether-mcp.service"])?;
                 ui::Ui::detect().success(&format!(
                     "Installed and started systemd user service: {}",
                     unit_path.display()
@@ -1260,6 +1348,11 @@ fn run_service(action: ServiceAction, parsed: &CliArgs) -> Result<()> {
                 let args = windows_task_args(&spec);
                 let arg_refs: Vec<&str> = args.iter().map(String::as_str).collect();
                 run_command_checked("schtasks", &arg_refs)?;
+                // `/Run` is ignored while an instance runs, so stop it first to apply the new
+                // definition. `/End` fails when nothing is running, which is fine.
+                let _ = std::process::Command::new("schtasks")
+                    .args(["/End", "/TN", "AetherMcpService"])
+                    .output();
                 run_command_checked("schtasks", &["/Run", "/TN", "AetherMcpService"])?;
                 ui::Ui::detect()
                     .success("Installed and started Windows scheduled task: AetherMcpService");
@@ -1338,6 +1431,11 @@ mod tests {
 
     fn args(items: &[&str]) -> Vec<String> {
         items.iter().map(|s| (*s).to_string()).collect()
+    }
+
+    /// The MCP clients under `home` with an empty environment.
+    fn clients_in(home: &Path) -> Vec<McpClient> {
+        known_mcp_client_configs(home, &|_| None)
     }
 
     #[test]
@@ -1917,7 +2015,7 @@ mod tests {
         });
 
         let all = ["Cursor", "Claude Code", "Antigravity"];
-        let updated = install_mcp_clients(home.path(), &entry, &all)
+        let updated = install_mcp_clients(&clients_in(home.path()), &entry, &all)
             .expect("install_mcp_clients must succeed");
         assert_eq!(updated.len(), 3);
         assert!(updated.contains(&cursor_dir.join("mcp.json")));
@@ -1934,10 +2032,115 @@ mod tests {
         );
         assert_eq!(cursor_json["mcpServers"]["aether-vault"], entry);
 
-        // Idempotent second run
-        let second = install_mcp_clients(home.path(), &entry, &all)
+        // A second run finds every entry up to date and writes nothing.
+        let second = install_mcp_clients(&clients_in(home.path()), &entry, &all)
             .expect("second install_mcp_clients must succeed");
-        assert_eq!(second.len(), 3);
+        assert!(second.is_empty());
+    }
+
+    #[test]
+    fn merge_aether_entry_applies_this_run_and_keeps_user_settings() {
+        let existing = json!({
+            "type": "stdio",
+            "command": "/old/aether-mcp",
+            "args": [
+                "--vault", "/vault-a", "--db", "/vault-a/custom.sqlite",
+                "--kv-endpoint", "http://127.0.0.1:8000", "--kv-model=llama-3.1-8b",
+                "--api-key", "aek_in_args", "--watch-ms", "0"
+            ],
+            "env": { "AETHER_API_KEY": "aek_in_env", "RUST_LOG": "debug" }
+        });
+
+        // A new vault: setup's own flags change, user flags stay, the old vault's --db goes.
+        let other_vault = json!({ "command": "/new/aether-mcp", "args": ["--vault", "/vault-b"] });
+        assert_eq!(
+            merge_aether_entry(&existing, &other_vault),
+            json!({
+                "type": "stdio",
+                "command": "/new/aether-mcp",
+                "args": [
+                    "--vault", "/vault-b", "--api-key", "aek_in_args",
+                    "--kv-endpoint", "http://127.0.0.1:8000", "--kv-model=llama-3.1-8b"
+                ],
+                "env": { "AETHER_API_KEY": "aek_in_env", "RUST_LOG": "debug" }
+            })
+        );
+
+        // The same vault keeps --db, and values passed on this run win.
+        let same_vault = json!({
+            "command": "/new/aether-mcp",
+            "args": ["--vault", "/vault-a", "--watch-ms", "0", "--kv-model", "qwen"],
+            "env": { "AETHER_API_KEY": "aek_new" }
+        });
+        let merged = merge_aether_entry(&existing, &same_vault);
+        assert_eq!(
+            merged["args"],
+            json!([
+                "--vault",
+                "/vault-a",
+                "--watch-ms",
+                "0",
+                "--kv-model",
+                "qwen",
+                "--db",
+                "/vault-a/custom.sqlite",
+                "--api-key",
+                "aek_in_args",
+                "--kv-endpoint",
+                "http://127.0.0.1:8000"
+            ])
+        );
+        assert_eq!(
+            merged["env"],
+            json!({ "AETHER_API_KEY": "aek_new", "RUST_LOG": "debug" })
+        );
+
+        // An entry that is not an object is replaced.
+        assert_eq!(
+            merge_aether_entry(&json!("junk"), &other_vault),
+            other_vault
+        );
+    }
+
+    #[test]
+    fn install_mcp_clients_updates_changed_entries_and_skips_identical_ones() {
+        let home = tempfile::tempdir().expect("tempdir");
+        let cursor = home.path().join(".cursor").join("mcp.json");
+        fs::create_dir_all(home.path().join(".cursor")).expect("create .cursor");
+        fs::create_dir_all(home.path().join(".claude")).expect("create .claude");
+        let claude = home.path().join(".claude.json");
+        fs::write(
+            &cursor,
+            r#"{"mcpServers":{"other":{"command":"echo"},"aether-vault":{"command":"aether-mcp","args":["--vault","/a"],"env":{"AETHER_API_KEY":"aek_keep"}}}}"#,
+        )
+        .expect("seed cursor");
+        let unselected =
+            r#"{"mcpServers":{"aether-vault":{"command":"aether-mcp","args":["--vault","/a"]}}}"#;
+        fs::write(&claude, unselected).expect("seed claude");
+
+        let entry = json!({ "command": "aether-mcp", "args": ["--vault", "/b"] });
+        let written = install_mcp_clients(&clients_in(home.path()), &entry, &["Cursor"])
+            .expect("install must succeed");
+        assert_eq!(written, vec![cursor.clone()]);
+        let config: Value =
+            serde_json::from_str(&fs::read_to_string(&cursor).expect("read cursor"))
+                .expect("parse cursor");
+        assert_eq!(config["mcpServers"]["other"], json!({ "command": "echo" }));
+        assert_eq!(
+            config["mcpServers"]["aether-vault"],
+            json!({ "command": "aether-mcp", "args": ["--vault", "/b"], "env": { "AETHER_API_KEY": "aek_keep" } })
+        );
+        assert_eq!(
+            fs::read_to_string(&claude).expect("read claude"),
+            unselected,
+            "an unselected client must not be touched"
+        );
+
+        let before = fs::read_to_string(&cursor).expect("read cursor");
+        let again = install_mcp_clients(&clients_in(home.path()), &entry, &["Cursor"])
+            .expect("install must succeed");
+        assert!(again.is_empty(), "an identical entry must not be rewritten");
+        assert_eq!(fs::read_to_string(&cursor).expect("read cursor"), before);
     }
 
     #[test]
@@ -1947,20 +2150,51 @@ mod tests {
         fs::create_dir_all(home.path().join(".claude")).expect("create .claude");
         let entry = json!({"command": "aether-mcp"});
 
-        let updated =
-            install_mcp_clients(home.path(), &entry, &["Cursor"]).expect("install must succeed");
+        let updated = install_mcp_clients(&clients_in(home.path()), &entry, &["Cursor"])
+            .expect("install must succeed");
         assert_eq!(updated, vec![home.path().join(".cursor").join("mcp.json")]);
         assert!(!home.path().join(".claude.json").exists());
 
-        let none = install_mcp_clients(home.path(), &entry, &[]).expect("install must succeed");
+        let none = install_mcp_clients(&clients_in(home.path()), &entry, &[])
+            .expect("install must succeed");
         assert!(none.is_empty());
+    }
+
+    #[test]
+    fn claude_code_config_follows_claude_config_dir() {
+        let claude_code = |env: &dyn Fn(&str) -> Option<String>| {
+            known_mcp_client_configs(Path::new("/home/u"), &env)
+                .into_iter()
+                .find(|(name, _, _)| *name == "Claude Code")
+                .map(|(_, dir, file)| (dir, file))
+                .expect("Claude Code is a known client")
+        };
+        assert_eq!(
+            claude_code(&|name| (name == "CLAUDE_CONFIG_DIR").then(|| "/work/claude".into())),
+            (
+                PathBuf::from("/work/claude"),
+                PathBuf::from("/work/claude/.claude.json")
+            )
+        );
+        let default = (
+            PathBuf::from("/home/u/.claude"),
+            PathBuf::from("/home/u/.claude.json"),
+        );
+        assert_eq!(claude_code(&|_| None), default);
+        assert_eq!(
+            claude_code(&|name| (name == "CLAUDE_CONFIG_DIR").then(|| " ".into())),
+            default
+        );
     }
 
     #[test]
     fn detected_client_names_lists_only_clients_with_a_config_or_folder() {
         let home = tempfile::tempdir().expect("tempdir");
         fs::create_dir_all(home.path().join(".cursor")).expect("create .cursor");
-        assert_eq!(detected_client_names(home.path()), vec!["Cursor"]);
+        assert_eq!(
+            detected_client_names(&clients_in(home.path())),
+            vec!["Cursor"]
+        );
     }
 
     #[test]
@@ -2009,13 +2243,14 @@ mod tests {
         fs::create_dir_all(vault.path().join(".aether")).expect("create .aether");
         fs::write(vault.path().join(".aether").join("aether.sqlite"), b"").expect("seed sqlite");
 
-        let report = collect_doctor_report(vault.path(), Some(home.path()))
+        let report = collect_doctor_report(vault.path(), &clients_in(home.path()))
             .expect("doctor on valid vault must succeed");
         assert!(report.vault_exists);
         assert!(report.sqlite_exists);
 
-        let missing = collect_doctor_report(&vault.path().join("nonexistent"), Some(home.path()))
-            .expect("doctor report on missing vault should still collect status");
+        let missing =
+            collect_doctor_report(&vault.path().join("nonexistent"), &clients_in(home.path()))
+                .expect("doctor report on missing vault should still collect status");
         assert!(!missing.vault_exists);
     }
 

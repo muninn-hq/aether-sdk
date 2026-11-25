@@ -14,7 +14,7 @@ use serde_json::Value;
 use super::ui::{Level, Line, Ui};
 use super::{
     build_mcp_json_snippet, collect_doctor_report, doctor_lines, install_mcp_clients, run_service,
-    CliArgs, ServiceAction,
+    CliArgs, McpClient, ServiceAction,
 };
 
 const PLUGIN_DIRECTORY_URL: &str = "https://community.obsidian.md/plugins/aether-memory";
@@ -125,13 +125,14 @@ fn wait_for_server(addr: SocketAddr, attempts: u32) -> bool {
 
 /// Performs the setup steps for `parsed.vault_root` and reports each result.
 /// Nothing here asks questions, so it can be tested and reused by `--yes`.
+/// `known` lists the MCP clients on this computer and `selected` names the ones to configure.
 pub fn apply_setup(
     parsed: &mut CliArgs,
-    home: &Path,
+    known: &[McpClient],
     cwd: &Path,
     exe: &Path,
     install_service: bool,
-    clients: &[&str],
+    selected: &[&str],
 ) -> Vec<Line> {
     let mut lines = Vec::new();
     let vault = parsed.vault_root.clone();
@@ -168,24 +169,20 @@ pub fn apply_setup(
     if let Some(ms) = stdio_watch_ms(install_service) {
         parsed.watch_ms_explicit = Some(ms);
     }
-    let report = collect_doctor_report(vault, Some(home));
-    let pending = report
-        .as_ref()
-        .map(|r| r.configured_clients.iter().filter(|c| !c.2).count())
-        .unwrap_or(0);
-    if clients.is_empty() {
+    if selected.is_empty() {
         lines.push(
             Line::new(Level::Info, "MCP clients: skipped")
                 .hint("add aether-vault to your client yourself, or run `aether-mcp setup` again"),
         );
-    } else if pending == 0 {
-        lines.push(Line::new(Level::Ok, "MCP clients already configured"));
     } else {
         let entry = build_mcp_json_snippet(parsed, vault, cwd, exe)
             .get("mcpServers")
             .and_then(|m| m.get("aether-vault"))
             .cloned();
-        match entry.map(|e| install_mcp_clients(home, &e, clients)) {
+        match entry.map(|e| install_mcp_clients(known, &e, selected)) {
+            Some(Ok(paths)) if paths.is_empty() => {
+                lines.push(Line::new(Level::Ok, "MCP clients already configured"));
+            }
             Some(Ok(paths)) => {
                 for path in paths {
                     lines.push(Line::new(
@@ -199,7 +196,7 @@ pub fn apply_setup(
         }
     }
 
-    if let Ok(report) = collect_doctor_report(vault, Some(home)) {
+    if let Ok(report) = collect_doctor_report(vault, known) {
         lines.extend(doctor_lines(&report, exe));
     }
     lines
@@ -376,19 +373,20 @@ pub fn run_setup(mut parsed: CliArgs) -> Result<()> {
     }
     parsed.vault_root = vault;
 
+    let known = super::known_mcp_client_configs(&home, &super::env_non_empty);
     let detected = if parsed.skip_clients {
         Vec::new()
     } else {
-        super::detected_client_names(&home)
+        super::detected_client_names(&known)
     };
-    let clients = if parsed.assume_yes || detected.is_empty() {
+    let selected = if parsed.assume_yes || detected.is_empty() {
         detected
     } else {
         ask_clients(&detected)?
     };
 
     let install_service = !parsed.skip_service;
-    let lines = apply_setup(&mut parsed, &home, &cwd, &exe, install_service, &clients);
+    let lines = apply_setup(&mut parsed, &known, &cwd, &exe, install_service, &selected);
     ui.print(&lines);
     ui.note("Next steps", &next_steps());
     ui.outro("Setup finished");
@@ -440,6 +438,11 @@ mod tests {
             std::env::temp_dir().join(format!("aether_setup_{name}_{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&dir).expect("temp dir");
         dir
+    }
+
+    /// The MCP clients under `home` with an empty environment.
+    fn known(home: &Path) -> Vec<McpClient> {
+        super::super::known_mcp_client_configs(home, &|_| None)
     }
 
     fn setup_args(vault: &Path, extra: &[&str]) -> CliArgs {
@@ -497,26 +500,77 @@ mod tests {
         let mut parsed = setup_args(&vault, &["--yes", "--no-service"]);
         let exe = Path::new("/bin/aether-mcp");
 
-        let skipped = apply_setup(&mut parsed, &home, &vault, exe, false, &[]);
+        let skipped = apply_setup(&mut parsed, &known(&home), &vault, exe, false, &[]);
         assert!(!home.join(".cursor/mcp.json").exists());
         assert!(skipped
             .iter()
             .any(|l| l.text.contains("Background service: skipped")));
 
-        let first = apply_setup(&mut parsed, &home, &vault, exe, false, &["Cursor"]);
+        let first = apply_setup(&mut parsed, &known(&home), &vault, exe, false, &["Cursor"]);
         let config = std::fs::read_to_string(home.join(".cursor/mcp.json")).expect("cursor config");
         assert!(config.contains("aether-vault"));
         assert!(first
             .iter()
             .any(|l| l.text.starts_with("MCP client configured")));
 
-        let second = apply_setup(&mut parsed, &home, &vault, exe, false, &["Cursor"]);
+        let second = apply_setup(&mut parsed, &known(&home), &vault, exe, false, &["Cursor"]);
         assert!(second
             .iter()
             .any(|l| l.text == "MCP clients already configured"));
         assert!(!second
             .iter()
             .any(|l| l.text.starts_with("MCP client configured")));
+    }
+
+    #[test]
+    fn apply_setup_moves_configured_clients_to_a_new_vault() {
+        let home = temp_dir("home");
+        let vault_a = temp_dir("vault_a");
+        let vault_b = temp_dir("vault_b");
+        std::fs::create_dir_all(home.join(".cursor")).expect("cursor dir");
+        std::fs::create_dir_all(home.join(".claude")).expect("claude dir");
+        let exe = Path::new("/bin/aether-mcp");
+        let mut first = setup_args(&vault_a, &["--yes", "--no-service"]);
+        apply_setup(
+            &mut first,
+            &known(&home),
+            &vault_a,
+            exe,
+            false,
+            &["Cursor", "Claude Code"],
+        );
+        let claude_before =
+            std::fs::read_to_string(home.join(".claude.json")).expect("claude config");
+
+        let mut second = setup_args(&vault_b, &["--yes", "--no-service"]);
+        let lines = apply_setup(
+            &mut second,
+            &known(&home),
+            &vault_b,
+            exe,
+            false,
+            &["Cursor"],
+        );
+        assert!(
+            lines
+                .iter()
+                .any(|l| l.text.starts_with("MCP client configured")),
+            "got: {:?}",
+            lines.iter().map(|l| &l.text).collect::<Vec<_>>()
+        );
+        let cursor: Value = serde_json::from_str(
+            &std::fs::read_to_string(home.join(".cursor/mcp.json")).expect("cursor config"),
+        )
+        .expect("cursor json");
+        assert_eq!(
+            cursor["mcpServers"]["aether-vault"]["args"][1],
+            vault_b.display().to_string()
+        );
+        assert_eq!(
+            std::fs::read_to_string(home.join(".claude.json")).expect("claude config"),
+            claude_before,
+            "an unselected client keeps its old entry"
+        );
     }
 
     #[test]
