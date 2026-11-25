@@ -1334,6 +1334,11 @@ fn run_service(action: ServiceAction, parsed: &CliArgs) -> Result<()> {
                 let args = windows_task_args(&spec);
                 let arg_refs: Vec<&str> = args.iter().map(String::as_str).collect();
                 run_command_checked("schtasks", &arg_refs)?;
+                // `/Run` is ignored while an instance runs, so stop it first to apply the new
+                // definition. `/End` fails when nothing is running, which is fine.
+                let _ = std::process::Command::new("schtasks")
+                    .args(["/End", "/TN", "AetherMcpService"])
+                    .output();
                 run_command_checked("schtasks", &["/Run", "/TN", "AetherMcpService"])?;
                 ui::Ui::detect()
                     .success("Installed and started Windows scheduled task: AetherMcpService");
