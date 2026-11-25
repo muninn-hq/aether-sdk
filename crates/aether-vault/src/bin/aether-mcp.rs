@@ -501,11 +501,19 @@ where
             home_dir.join(".cursor"),
             home_dir.join(".cursor").join("mcp.json"),
         ),
-        (
-            "Claude Code",
-            home_dir.join(".claude"),
-            home_dir.join(".claude.json"),
-        ),
+        // Claude Code keeps `.claude.json` inside CLAUDE_CONFIG_DIR when it is set.
+        match env("CLAUDE_CONFIG_DIR").filter(|v| !v.trim().is_empty()) {
+            Some(dir) => (
+                "Claude Code",
+                PathBuf::from(&dir),
+                Path::new(&dir).join(".claude.json"),
+            ),
+            None => (
+                "Claude Code",
+                home_dir.join(".claude"),
+                home_dir.join(".claude.json"),
+            ),
+        },
         (
             "Antigravity",
             home_dir.join(".gemini").join("antigravity"),
@@ -2150,6 +2158,33 @@ mod tests {
         let none = install_mcp_clients(&clients_in(home.path()), &entry, &[])
             .expect("install must succeed");
         assert!(none.is_empty());
+    }
+
+    #[test]
+    fn claude_code_config_follows_claude_config_dir() {
+        let claude_code = |env: &dyn Fn(&str) -> Option<String>| {
+            known_mcp_client_configs(Path::new("/home/u"), &env)
+                .into_iter()
+                .find(|(name, _, _)| *name == "Claude Code")
+                .map(|(_, dir, file)| (dir, file))
+                .expect("Claude Code is a known client")
+        };
+        assert_eq!(
+            claude_code(&|name| (name == "CLAUDE_CONFIG_DIR").then(|| "/work/claude".into())),
+            (
+                PathBuf::from("/work/claude"),
+                PathBuf::from("/work/claude/.claude.json")
+            )
+        );
+        let default = (
+            PathBuf::from("/home/u/.claude"),
+            PathBuf::from("/home/u/.claude.json"),
+        );
+        assert_eq!(claude_code(&|_| None), default);
+        assert_eq!(
+            claude_code(&|name| (name == "CLAUDE_CONFIG_DIR").then(|| " ".into())),
+            default
+        );
     }
 
     #[test]
