@@ -577,6 +577,69 @@ fn merge_mcp_server_into_config(
     Ok(rendered)
 }
 
+/// Flags of an existing `aether-vault` entry that are kept when this run does not pass them.
+/// `--db` names one vault's index, so it is kept only while the vault stays the same.
+const KEPT_ENTRY_FLAGS: [&str; 4] = ["--db", "--api-key", "--kv-endpoint", "--kv-model"];
+
+/// The `flag value` or `flag=value` arguments for the first `flag` in `args`.
+fn flag_args(args: &[Value], flag: &str) -> Vec<Value> {
+    let inline = format!("{flag}=");
+    for (idx, arg) in args.iter().enumerate() {
+        match arg.as_str() {
+            Some(s) if s == flag => return args[idx..args.len().min(idx + 2)].to_vec(),
+            Some(s) if s.starts_with(&inline) => return vec![arg.clone()],
+            _ => {}
+        }
+    }
+    Vec::new()
+}
+
+/// The `aether-vault` entry to write over `existing`: `command`, `--vault`, `--watch-ms`, and
+/// every flag passed on this run come from `desired`. Other keys, environment variables, and
+/// the flags in [`KEPT_ENTRY_FLAGS`] stay as the user left them.
+fn merge_aether_entry(existing: &Value, desired: &Value) -> Value {
+    let (Some(old), Some(new)) = (existing.as_object(), desired.as_object()) else {
+        return desired.clone();
+    };
+    let old_args = old
+        .get("args")
+        .and_then(Value::as_array)
+        .map(Vec::as_slice)
+        .unwrap_or_default();
+    let mut args = new
+        .get("args")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    let same_vault = flag_args(old_args, "--vault") == flag_args(&args, "--vault");
+    for flag in KEPT_ENTRY_FLAGS {
+        if (flag == "--db" && !same_vault) || !flag_args(&args, flag).is_empty() {
+            continue;
+        }
+        args.extend(flag_args(old_args, flag));
+    }
+
+    let mut merged = old.clone();
+    for (key, value) in new {
+        if key != "env" {
+            merged.insert(key.clone(), value.clone());
+        }
+    }
+    merged.insert("args".to_string(), Value::Array(args));
+    let mut env = old
+        .get("env")
+        .and_then(Value::as_object)
+        .cloned()
+        .unwrap_or_default();
+    if let Some(new_env) = new.get("env").and_then(Value::as_object) {
+        env.extend(new_env.clone());
+    }
+    if !env.is_empty() {
+        merged.insert("env".to_string(), Value::Object(env));
+    }
+    Value::Object(merged)
+}
+
 /// Names of the MCP clients that have a config file or a folder on this machine.
 fn detected_client_names(home_dir: &Path) -> Vec<&'static str> {
     known_mcp_client_configs(home_dir)
@@ -586,7 +649,9 @@ fn detected_client_names(home_dir: &Path) -> Vec<&'static str> {
         .collect()
 }
 
-/// Adds the server entry to the detected clients whose names are in `selected`.
+/// Writes the server entry to the detected clients whose names are in `selected`, merged
+/// with any existing entry as [`merge_aether_entry`] describes. Returns the files it changed:
+/// a client whose entry is already up to date is left alone.
 fn install_mcp_clients(
     home_dir: &Path,
     server_entry: &Value,
@@ -616,8 +681,18 @@ fn install_mcp_clients(
         } else {
             None
         };
-        let rendered =
-            merge_mcp_server_into_config(existing.as_deref(), "aether-vault", server_entry)?;
+        let current = existing
+            .as_deref()
+            .and_then(|raw| serde_json::from_str::<Value>(raw).ok())
+            .and_then(|config| config.get("mcpServers")?.get("aether-vault").cloned());
+        let entry = match &current {
+            Some(current) => merge_aether_entry(current, server_entry),
+            None => server_entry.clone(),
+        };
+        if current.as_ref() == Some(&entry) {
+            continue;
+        }
+        let rendered = merge_mcp_server_into_config(existing.as_deref(), "aether-vault", &entry)?;
         write_file_atomic(&config_path, rendered.as_bytes())?;
         updated.push(config_path);
     }
@@ -1934,10 +2009,115 @@ mod tests {
         );
         assert_eq!(cursor_json["mcpServers"]["aether-vault"], entry);
 
-        // Idempotent second run
+        // A second run finds every entry up to date and writes nothing.
         let second = install_mcp_clients(home.path(), &entry, &all)
             .expect("second install_mcp_clients must succeed");
-        assert_eq!(second.len(), 3);
+        assert!(second.is_empty());
+    }
+
+    #[test]
+    fn merge_aether_entry_applies_this_run_and_keeps_user_settings() {
+        let existing = json!({
+            "type": "stdio",
+            "command": "/old/aether-mcp",
+            "args": [
+                "--vault", "/vault-a", "--db", "/vault-a/custom.sqlite",
+                "--kv-endpoint", "http://127.0.0.1:8000", "--kv-model=llama-3.1-8b",
+                "--api-key", "aek_in_args", "--watch-ms", "0"
+            ],
+            "env": { "AETHER_API_KEY": "aek_in_env", "RUST_LOG": "debug" }
+        });
+
+        // A new vault: setup's own flags change, user flags stay, the old vault's --db goes.
+        let other_vault = json!({ "command": "/new/aether-mcp", "args": ["--vault", "/vault-b"] });
+        assert_eq!(
+            merge_aether_entry(&existing, &other_vault),
+            json!({
+                "type": "stdio",
+                "command": "/new/aether-mcp",
+                "args": [
+                    "--vault", "/vault-b", "--api-key", "aek_in_args",
+                    "--kv-endpoint", "http://127.0.0.1:8000", "--kv-model=llama-3.1-8b"
+                ],
+                "env": { "AETHER_API_KEY": "aek_in_env", "RUST_LOG": "debug" }
+            })
+        );
+
+        // The same vault keeps --db, and values passed on this run win.
+        let same_vault = json!({
+            "command": "/new/aether-mcp",
+            "args": ["--vault", "/vault-a", "--watch-ms", "0", "--kv-model", "qwen"],
+            "env": { "AETHER_API_KEY": "aek_new" }
+        });
+        let merged = merge_aether_entry(&existing, &same_vault);
+        assert_eq!(
+            merged["args"],
+            json!([
+                "--vault",
+                "/vault-a",
+                "--watch-ms",
+                "0",
+                "--kv-model",
+                "qwen",
+                "--db",
+                "/vault-a/custom.sqlite",
+                "--api-key",
+                "aek_in_args",
+                "--kv-endpoint",
+                "http://127.0.0.1:8000"
+            ])
+        );
+        assert_eq!(
+            merged["env"],
+            json!({ "AETHER_API_KEY": "aek_new", "RUST_LOG": "debug" })
+        );
+
+        // An entry that is not an object is replaced.
+        assert_eq!(
+            merge_aether_entry(&json!("junk"), &other_vault),
+            other_vault
+        );
+    }
+
+    #[test]
+    fn install_mcp_clients_updates_changed_entries_and_skips_identical_ones() {
+        let home = tempfile::tempdir().expect("tempdir");
+        let cursor = home.path().join(".cursor").join("mcp.json");
+        fs::create_dir_all(home.path().join(".cursor")).expect("create .cursor");
+        fs::create_dir_all(home.path().join(".claude")).expect("create .claude");
+        let claude = home.path().join(".claude.json");
+        fs::write(
+            &cursor,
+            r#"{"mcpServers":{"other":{"command":"echo"},"aether-vault":{"command":"aether-mcp","args":["--vault","/a"],"env":{"AETHER_API_KEY":"aek_keep"}}}}"#,
+        )
+        .expect("seed cursor");
+        let unselected =
+            r#"{"mcpServers":{"aether-vault":{"command":"aether-mcp","args":["--vault","/a"]}}}"#;
+        fs::write(&claude, unselected).expect("seed claude");
+
+        let entry = json!({ "command": "aether-mcp", "args": ["--vault", "/b"] });
+        let written =
+            install_mcp_clients(home.path(), &entry, &["Cursor"]).expect("install must succeed");
+        assert_eq!(written, vec![cursor.clone()]);
+        let config: Value =
+            serde_json::from_str(&fs::read_to_string(&cursor).expect("read cursor"))
+                .expect("parse cursor");
+        assert_eq!(config["mcpServers"]["other"], json!({ "command": "echo" }));
+        assert_eq!(
+            config["mcpServers"]["aether-vault"],
+            json!({ "command": "aether-mcp", "args": ["--vault", "/b"], "env": { "AETHER_API_KEY": "aek_keep" } })
+        );
+        assert_eq!(
+            fs::read_to_string(&claude).expect("read claude"),
+            unselected,
+            "an unselected client must not be touched"
+        );
+
+        let before = fs::read_to_string(&cursor).expect("read cursor");
+        let again =
+            install_mcp_clients(home.path(), &entry, &["Cursor"]).expect("install must succeed");
+        assert!(again.is_empty(), "an identical entry must not be rewritten");
+        assert_eq!(fs::read_to_string(&cursor).expect("read cursor"), before);
     }
 
     #[test]
