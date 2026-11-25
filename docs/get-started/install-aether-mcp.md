@@ -43,7 +43,10 @@ aether-mcp setup
 3. Shows a checklist of the MCP clients it finds. Nothing is checked by default, so check the clients you want, or leave them all unchecked and add `aether-vault` to your IDE yourself. Checked clients keep their other servers.
 4. Runs the same checks as `aether-mcp doctor` and prints what to do next.
 
-Running it again is safe, and clients that are already configured are left alone.
+Running it again is safe.
+It restarts the background service with the vault you choose, updates the checked clients whose `aether-vault` entry differs, and leaves up-to-date clients alone.
+To switch to another vault, run `aether-mcp setup --vault /path/to/other-vault`, then restart your MCP clients.
+See [MCP client configs](../reference/aether-mcp.md#mcp-client-configs) for which files it changes and what it keeps.
 
 To remove everything again, run `aether-mcp uninstall`. It stops the background service and removes `aether-vault` from the MCP clients, keeping their other servers. Add `--vault <path>` to also remove that vault's AMC plugin files, and `--purge-vault` to delete its index and `Aether/` folder. Your notes are never deleted. The command asks before it changes anything, or pass `--yes` to skip the question.
 

@@ -22,6 +22,7 @@ Output is plain text when it is piped, when `NO_COLOR` is set, or when `TERM` is
 | `--http-addr <addr>` | `AETHER_HTTP_ADDR` | Disabled | Bind `SocketAddr` for `ControlPlaneServer` (e.g. `127.0.0.1:14771`) |
 | `--http-only` | None | `false` | Serves `ControlPlaneServer` without `stdio` MCP until `Ctrl-C` / `SIGTERM` (requires `--http-addr`) |
 | `--init` | None | `false` | Installs `obsidian-aether-plugin`, writes `data.json`, prints `mcp.json`, and exits (`AETHER_PLUGIN_DIR` overrides plugin source) |
+| `--install-clients` | None | `false` | With `--init`, also writes `aether-vault` into every detected MCP client config, as described in [MCP client configs](#mcp-client-configs) |
 | `--require-auth` | `AETHER_REQUIRE_AUTH` (`1`, `true`, `yes`) | `false` | Requires `Authorization: Bearer aek_<hex>` and allows non-loopback HTTP binds |
 | `--bootstrap-admin-key <key>` | `AETHER_BOOTSTRAP_ADMIN_KEY` | None | Ensures an `Admin` key for `AgentId` `"bootstrap-admin"` exists in SQLite |
 | `--api-key <key>` | `AETHER_API_KEY` | None | Binds the `stdio` MCP session (or `--init` `data.json` / `mcp.json`) to a validated `ScopedApiKey` |
@@ -32,16 +33,46 @@ Output is plain text when it is piped, when `NO_COLOR` is set, or when `TERM` is
 
 | Command or image | Purpose |
 | --- | --- |
-| `aether-mcp service install [--vault <path>] [--http-addr <addr>] [--watch-ms <ms>]` | Registers and starts an auto-starting user service (`launchd` on macOS, `systemd --user` on Linux, Task Scheduler on Windows; defaults `--http-addr` to `127.0.0.1:14771`) |
+| `aether-mcp service install [--vault <path>] [--http-addr <addr>] [--watch-ms <ms>]` | Registers and starts an auto-starting user service (`launchd` on macOS, `systemd --user` on Linux, Task Scheduler on Windows; defaults `--http-addr` to `127.0.0.1:14771`). Running it again replaces the service definition and restarts the service, so the new settings take effect |
 | `aether-mcp service status` | Prints the status of the installed user service |
 | `aether-mcp service uninstall` | Stops and removes the user service definition |
-| `aether-mcp setup [--vault <path>] [--yes] [--no-clients] [--no-service]` | Guided first-run setup: finds your Obsidian vaults (or lets you pick the current folder, browse for one, or type a path), installs the background service, offers a checklist of detected MCP clients to add `aether-vault` to, checks the result, and prints the next steps. `--yes` accepts the defaults and configures every detected client. Without a terminal and without `--yes` it exits with an explanation |
+| `aether-mcp setup [--vault <path>] [--yes] [--no-clients] [--no-service]` | Guided first-run setup: finds your Obsidian vaults (or lets you pick the current folder, browse for one, or type a path), installs the background service, offers a checklist of detected MCP clients to add `aether-vault` to, checks the result, and prints the next steps. `--yes` accepts the defaults and configures every detected client. Running it again updates the checked clients whose entry differs, see [MCP client configs](#mcp-client-configs). Without a terminal and without `--yes` it exits with an explanation |
 | `aether-mcp uninstall [--vault <path>] [--purge-vault] [--yes]` | Stops and removes the background service, removes `aether-vault` from MCP client configs (other servers are kept), and prints how to remove the program. With `--vault`, also removes the vault's AMC plugin files; `--purge-vault` also deletes its `.aether/` index and `Aether/` folder. Notes are never deleted. Asks for confirmation unless `--yes` is given |
 | `aether-mcp doctor [--vault <path>]` | Checks the vault, the binary, and detected MCP client configs, with a fix hint beside each problem |
 | `aether-mcp completions <bash\|zsh\|fish\|powershell\|elvish>` | Prints a shell completion script to stdout |
 | `aether-mcp --help`, `aether-mcp --version` | Prints usage or the version |
 | `npx @muninn-org/aether-mcp` | Runs the matching release binary through Node.js, downloading and verifying it on first use. See [Install aether-mcp](../get-started/install-aether-mcp.md) |
 | `ghcr.io/muninn-hq/aether-mcp` | Multi-arch (`linux/amd64`, `linux/arm64`) container image with `ENTRYPOINT ["aether-mcp"]` and `/vault` volume |
+
+### MCP client configs
+
+`setup`, `--init --install-clients`, `doctor`, and `uninstall` work on the same client config files.
+
+| Client | Config file |
+| --- | --- |
+| Cursor | `~/.cursor/mcp.json` |
+| Claude Code | `~/.claude.json`, or `$CLAUDE_CONFIG_DIR/.claude.json` when `CLAUDE_CONFIG_DIR` is set |
+| Antigravity | `~/.gemini/antigravity/mcp_config.json` |
+| Claude Desktop | `claude_desktop_config.json` in `~/Library/Application Support/Claude` (macOS), `~/.config/Claude` (Linux), or `%APPDATA%\Claude` (Windows) |
+
+Only the `aether-vault` entry is written, so other servers and settings in the file stay as they are, and clients you did not select are not touched.
+When a client already has an `aether-vault` entry, the command, `--vault`, `--watch-ms`, and every flag you pass on this run are updated.
+Other keys and `env` variables in the entry, such as `AETHER_API_KEY`, are kept, and so are `--api-key`, `--kv-endpoint`, and `--kv-model` unless you pass new values.
+`--db` is kept only while the vault stays the same, because it names that vault's index.
+A client whose entry is already up to date is not rewritten.
+
+### Switch to another vault
+
+Run setup again with the new vault:
+
+```bash
+aether-mcp setup --vault /path/to/other-vault
+```
+
+It rewrites the background service for the new vault, restarts it, and updates the checked MCP clients.
+Restart your MCP clients afterwards so they start the server with the new vault.
+To move only the service, run `aether-mcp service install --vault /path/to/other-vault`.
+To move only the clients, run `aether-mcp setup --no-service --vault /path/to/other-vault` or `aether-mcp --init --install-clients --vault /path/to/other-vault`.
 
 ## MCP JSON-RPC 2.0 protocol and tools
 
