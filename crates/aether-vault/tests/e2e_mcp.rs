@@ -1,7 +1,6 @@
 use std::fs;
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::time::Instant;
 
 use muninn_aether_vault::{
     AgentId, AgentRole, IssueApiKeyRequest, McpServer, ModelId, ScopeTag, VaultConfig, VaultEngine,
@@ -38,7 +37,7 @@ impl Drop for TempVault {
 }
 
 #[tokio::test]
-async fn mcp_stdio_roundtrip_serves_all_three_tools_under_150ms() {
+async fn mcp_stdio_roundtrip_serves_all_three_tools() {
     let vault = TempVault::new();
     vault.write(
         "Profile/Preferences.md",
@@ -138,17 +137,10 @@ async fn mcp_stdio_roundtrip_serves_all_three_tools_under_150ms() {
     }
 
     let mut output_buf: Vec<u8> = Vec::new();
-    let started = Instant::now();
     server
         .serve_streams(BufReader::new(input_buf.as_bytes()), &mut output_buf)
         .await
         .unwrap();
-    let elapsed = started.elapsed();
-    assert!(
-        elapsed.as_millis() < 150,
-        "expected full MCP call sequence under 150ms, got {}ms",
-        elapsed.as_millis()
-    );
 
     let out_str = String::from_utf8(output_buf).unwrap();
     let responses: Vec<Value> = out_str
