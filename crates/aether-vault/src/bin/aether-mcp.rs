@@ -1183,10 +1183,9 @@ fn run_service(action: ServiceAction, parsed: &CliArgs) -> Result<()> {
                     }
                 })?;
                 run_command_checked("systemctl", &["--user", "daemon-reload"])?;
-                run_command_checked(
-                    "systemctl",
-                    &["--user", "enable", "--now", "aether-mcp.service"],
-                )?;
+                run_command_checked("systemctl", &["--user", "enable", "aether-mcp.service"])?;
+                // `enable --now` leaves a running service on the old definition; restart applies it.
+                run_command_checked("systemctl", &["--user", "restart", "aether-mcp.service"])?;
                 ui::Ui::detect().success(&format!(
                     "Installed and started systemd user service: {}",
                     unit_path.display()
